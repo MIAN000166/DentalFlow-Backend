@@ -1,5 +1,8 @@
 import uuid
 import stripe
+from django.core.mail import send_mail
+from random import randint
+from django.utils import timezone
 from django.shortcuts import render
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
@@ -20,7 +23,7 @@ from core.helpers import(
 from core.permission import(
     UserAuthenticated
 )
-from admin_side.models import Package, UserPackage
+from admin_side.models import Package,UserPackage,Feature
 from django.conf import settings
 from core.choices import UserType
 from user.serializer import (
@@ -28,7 +31,13 @@ from user.serializer import (
     UserLoginSerializer,
     GetUserProfileSerializer,
     UpdateProfileSerializer,
-    GetAllPackageSerializer
+    GetAllPackageSerializer,
+    GetAllSubScription,
+    SendOTPSerializer,
+    VerifyOTPSerializer,
+    ResetPasswordSerializer,
+    FeatureSerializer
+
 )
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -113,6 +122,76 @@ class Auth(ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
 
+class PasswordResetViewSet(ModelViewSet):
+
+    @action(detail=False, methods=['POST'])
+    def send_otp(self, request):
+        serializer = SendOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response({"status": False, "message": "Email not registered."}, status=status.HTTP_400_BAD_REQUEST)
+
+            otp = str(randint(100000, 999999))
+            user.password_reset_otp = otp
+            user.otp_created_at = timezone.now()
+            user.save()
+
+            send_mail(
+                "Your OTP for Password Reset",
+                f"Your OTP is: {otp}",
+                "khan.245lala@gmail.com",
+                [email],
+            )
+
+            return Response({"status": True, "message": "OTP sent to your email."}, status=status.HTTP_200_OK)
+
+        return Response({"status": False, "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['POST'])
+    def verify_otp(self, request):
+        serializer = VerifyOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            otp = serializer.validated_data['otp']
+
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response({"status": False, "message": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if user.password_reset_otp != otp or user.is_otp_expired():
+                return Response({"status": False, "message": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({"status": True, "message": "OTP verified successfully."}, status=status.HTTP_200_OK)
+
+        return Response({"status": False, "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['POST'])
+    def reset_password(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            new_password = serializer.validated_data['new_password']
+
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response({"status": False, "message": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            user.set_password(new_password)
+            user.password_reset_otp = None
+            user.otp_created_at = None
+            user.save()
+
+            return Response({"status": True, "message": "Password reset successfully."}, status=status.HTTP_200_OK)
+
+        return Response({"status": False, "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 class UserProfile(ModelViewSet):
 
@@ -151,7 +230,22 @@ class UserProfile(ModelViewSet):
 class PackageView(ModelViewSet):
     """User-side Package View"""
 
-    @action(detail=False, methods=['GET'], permission_classes=[UserAuthenticated])
+    @action(detail=False, methods=['GET'])
+    def all_features(self, request):
+        try:
+            features = Feature.objects.all().order_by('-created_at')
+            serializer = FeatureSerializer(features, many=True)
+            return Response({
+                "status": True,
+                "data": serializer.data
+            }, status=200)
+        except Exception as e:
+            return Response({
+                "status": False,
+                "message": str(e)
+            }, status=400)
+
+    @action(detail=False, methods=['GET'])
     def get_all_packages(self, request):
         """Fetch all available packages with features"""
         try:
@@ -166,8 +260,8 @@ class PackageView(ModelViewSet):
                 "status": False,
                 "message": f"Error fetching packages: {str(e)}"
             }, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=False, methods=['POST'],permission_classes=[UserAuthenticated])
+        
+    @action(detail=False, methods=['POST'], permission_classes=[UserAuthenticated])
     def stripe_checkout(self, request):
         package_id = request.data.get('package_id')
         user = request.user
@@ -175,10 +269,17 @@ class PackageView(ModelViewSet):
         try:
             package = Package.objects.get(id=package_id)
         except Package.DoesNotExist:
-            return Response({"status": False, "message": "Package not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"status": False, "message": "Package not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         try:
-            # Stripe Checkout session create karna
+            origin = request.META.get('HTTP_ORIGIN')
+
+            success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
+            cancel_url = f"{origin}/failed"
+
             checkout_session = stripe.checkout.Session.create(
                 payment_method_types=['card'],
                 line_items=[{
@@ -188,13 +289,13 @@ class PackageView(ModelViewSet):
                             'name': package.name,
                             'description': package.description,
                         },
-                        'unit_amount': int(package.price_per_month * 100),  # cents me
+                        'unit_amount': int(package.price_per_month * 100),
                     },
                     'quantity': 1,
                 }],
                 mode='payment',
-                success_url="http://localhost:8000/success?session_id={CHECKOUT_SESSION_ID}",
-                cancel_url="http://localhost:8000/cancel",
+                success_url=success_url,
+                cancel_url=cancel_url,
                 metadata={
                     "user_id": str(user.id),
                     "package_id": str(package.id)
@@ -207,7 +308,10 @@ class PackageView(ModelViewSet):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response({"status": False, "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"status": False, "message": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
     @method_decorator(csrf_exempt)
@@ -230,16 +334,12 @@ class PackageView(ModelViewSet):
             session = event['data']['object']
             user_id = session['metadata'].get('user_id')
             package_id = session['metadata'].get('package_id')
-            print("user   _____________________________________ ",user_id)
-            print("package   _____________________________________ ",package_id)
-            # Validate UUID
             try:
                 user_uuid = uuid.UUID(user_id)
                 package_uuid = uuid.UUID(package_id)
             except (ValueError, TypeError):
                 return Response({'status': False, 'message': 'Invalid user_id or package_id in metadata'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Fetch user and package
             try:
                 user = User.objects.get(id=user_uuid)
                 package = Package.objects.get(id=package_uuid)
@@ -260,4 +360,13 @@ class PackageView(ModelViewSet):
             )
 
         return Response({'status': True, 'message': 'Webhook received'}, status=status.HTTP_200_OK)
+
+    @action(detail=False,methods=["GET"],permission_classes=[UserAuthenticated])
+    def subscriptions(self,request):
+        user = request.user
+        user_pckg = UserPackage.objects.filter(user=user)
+        serializer = GetAllSubScription(user_pckg,many=True)
+
+        return Response({"status":True,"data":serializer.data},status=status.HTTP_200_OK)
+
 

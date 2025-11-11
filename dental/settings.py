@@ -83,7 +83,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://26888d9e628f.ngrok-free.app",
 ]
 
-
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://dental-flow.netlify.app"
+]
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
@@ -130,9 +133,24 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = (BASE_DIR / "static",)
 
+
+# Media files
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "/media/"
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST='smtp.gmail.com'
+EMAIL_PORT = 465
+EMAIL_USE_TLS = False
+EMAIL_USE_SSL = True
+EMAIL_HOST_USER='khan.245lala@gmail.com'
+EMAIL_HOST_PASSWORD='ysbphbtevpbclygy'

@@ -338,16 +338,14 @@ class FeatureAPI(ModelViewSet):
 
     @action(detail=False, methods=['POST'], permission_classes=[AdminAuthenticated])
     def create_feature(self, request):
-        """Create a new feature"""
         try:
-            admin = request.user
-            serializer = FeatureSerializer(data=request.data)
+            serializer = FeatureSerializer(data=request.data, context={'request': request})
             if serializer.is_valid():
-                serializer.save(admin=admin)
+                feature = serializer.save()
                 return Response({
                     "status": True,
-                    "data": serializer.data,
-                    "message": "Feature created successfully."
+                    "message": "Feature created successfully.",
+                    "data": FeatureSerializer(feature).data
                 }, status=status.HTTP_201_CREATED)
             return Response({
                 "status": False,
@@ -358,6 +356,7 @@ class FeatureAPI(ModelViewSet):
                 "status": False,
                 "message": f"Error creating feature: {str(e)}"
             }, status=status.HTTP_400_BAD_REQUEST)
+
 
     @action(detail=False, methods=['PATCH'], permission_classes=[AdminAuthenticated])
     def update_feature(self, request):

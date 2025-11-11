@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 from core.choices import UserType
 from user.manager import UserManager
 from core.base_model import BaseModel
@@ -34,11 +35,20 @@ class User(AbstractBaseUser):
 
     objects = UserManager()
 
+    password_reset_otp = models.CharField(max_length=6, blank=True, null=True)
+    otp_created_at = models.DateTimeField(blank=True, null=True)
+
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
 
     def __str__(self):
         return f"{self.id}----{self.phone}--{self.first_name}--{self.profile_image}--{self.email} ({self.role})"
+
+    def is_otp_expired(self):
+        if not self.otp_created_at:
+            return True
+        return (timezone.now() - self.otp_created_at).total_seconds() > 600  # 10 min expiry
 
 
 class UserWhitelistToken(BaseModel):

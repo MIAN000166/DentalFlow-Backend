@@ -2,9 +2,12 @@ from passlib.hash import django_pbkdf2_sha256 as handler
 from user.models import User
 from core.utils import check_password_requirements
 from core.choices import UserType
-from admin_side.models import Package,PackageFeature
+from admin_side.models import Package,PackageFeature,UserPackage
+from admin_side.models import Feature, CartFeature
 from rest_framework.serializers import(
+    Serializer,
     ModelSerializer,
+    EmailField,
     CharField,
     ValidationError,
     SerializerMethodField
@@ -83,7 +86,7 @@ class PackageFeatureSerializer(ModelSerializer):
         fields = ["id", "name"]
 
 class GetAllPackageSerializer(ModelSerializer):
-    features = PackageFeatureSerializer(many=True, read_only=True)
+    features = SerializerMethodField()
 
     class Meta:
         model = Package
@@ -95,3 +98,84 @@ class GetAllPackageSerializer(ModelSerializer):
             "is_popular",
             "features"
         ]
+
+    def get_features(self, obj):
+        # Apne package ke khud ke features
+        current_features = list(obj.features.values_list("name", flat=True))
+        name = obj.name.lower()
+
+        # Agar package professional hai
+        if name == "professional":
+            # Remove basic ke duplicate features
+            basic_pkg = Package.objects.filter(name="basic", admin=obj.admin).first()
+            if basic_pkg:
+                basic_features = set(basic_pkg.features.values_list("name", flat=True))
+                # Professional ke features me se basic wale hata do
+                current_features = [f for f in current_features if f not in basic_features]
+            return ["Everything in Basic", *current_features]
+
+        # Agar package premium hai
+        elif name == "premium":
+            prof_pkg = Package.objects.filter(name="professional", admin=obj.admin).first()
+            if prof_pkg:
+                prof_features = set(prof_pkg.features.values_list("name", flat=True))
+                current_features = [f for f in current_features if f not in prof_features]
+            return ["Everything in Professional", *current_features]
+
+        # Basic package simple return
+        return current_features
+
+    # def get_features(self, obj):
+    #     """Return features with inheritance message"""
+    #     features = list(obj.features.values_list("name", flat=True))
+
+    #     # Logic for hierarchical packages
+    #     if obj.name.lower() == "professional":
+    #         # Add message for inherited Basic plan
+    #         return ["Everything in Basic", *features]
+
+    #     elif obj.name.lower() == "premium":
+    #         # Add message for inherited Professional plan
+    #         return ["Everything in Professional", *features]
+
+    #     # Otherwise (Basic or other plans)
+    #     return features
+
+class GetAllSubScription(ModelSerializer):
+    package_name = SerializerMethodField()
+    package_price = SerializerMethodField()
+
+    class Meta:
+        model = UserPackage
+        fields = ['id','user','package','package_name','package_price','start_date','end_date','is_active','payment_status']
+        read_only_field = ['user']
+
+    def get_package_name(self,obj):
+        return obj.package.name
+    
+    def get_package_price(self,obj):
+        return obj.package.price_per_month
+    
+
+class SendOTPSerializer(Serializer):
+    email = EmailField()
+
+class VerifyOTPSerializer(Serializer):
+    email = EmailField()
+    otp = CharField(max_length=6)
+
+class ResetPasswordSerializer(Serializer):
+    email = EmailField()
+    new_password = CharField(min_length=6, write_only=True)
+
+class FeatureCartItemSerializer(ModelSerializer):
+    class Meta:
+        model = CartFeature
+        fields = ['id', 'name']
+
+class FeatureSerializer(ModelSerializer):
+    cart = FeatureCartItemSerializer(read_only=True)  
+
+    class Meta:
+        model = Feature
+        fields = ["id", "name", "description", "cart"]

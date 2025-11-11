@@ -2,7 +2,7 @@ from passlib.hash import django_pbkdf2_sha256 as handler
 from user.models import User
 from core.utils import check_password_requirements
 from core.choices import UserType
-from admin_side.models import Package,PackageFeature,Feature
+from admin_side.models import Package,PackageFeature,CartFeature,Feature
 from rest_framework.serializers import(
     ModelSerializer,
     CharField,
@@ -77,10 +77,6 @@ class UpdateAdminProfileSerializer(ModelSerializer):
         instance.save()
         return instance
     
-from rest_framework.serializers import ModelSerializer
-from .models import Package, PackageFeature
-
-
 class PackageFeatureSerializer(ModelSerializer):
     class Meta:
         model = PackageFeature
@@ -131,9 +127,28 @@ class GetAllPackageSerializer(ModelSerializer):
         model = Package
         fields = ["id", "name", "description", "price_per_month", "is_popular", "features"]
 
+class FeatureCartItemSerializer(ModelSerializer):
+    class Meta:
+        model = CartFeature
+        fields = ['id', 'name']
 
 
 class FeatureSerializer(ModelSerializer):
+    cart = FeatureCartItemSerializer(many=True)
+
     class Meta:
         model = Feature
-        fields = ["id", "name", "description"]
+        fields = ["id", "name", "description", "cart"]
+
+    def create(self, validated_data):
+        cart_data = validated_data.pop('cart', [])
+        admin = self.context['request'].user
+
+        feature = Feature.objects.create(admin=admin, **validated_data)
+
+        for cart_item in cart_data:
+            cart_obj, _ = CartFeature.objects.get_or_create(**cart_item)
+            feature.cart.add(cart_obj)
+
+        return feature
+

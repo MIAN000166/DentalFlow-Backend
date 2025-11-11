@@ -32,7 +32,7 @@ class PackageFeature(BaseModel):
 
 
 
-class UserPackage(models.Model):
+class UserPackage(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="subscriptions")
     package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name="subscriptions")
     start_date = models.DateField(auto_now_add=True)
@@ -56,9 +56,12 @@ class UserPackage(models.Model):
         verbose_name_plural = "User Package Subscriptions"
 
 
+class CartFeature(BaseModel):
+    name = models.CharField(max_length=100)
 
 class Feature(BaseModel):
     admin = models.ForeignKey(User,on_delete=models.CASCADE,related_name='features')
+    cart = models.ManyToManyField(CartFeature, related_name='features')
     name = models.CharField(max_length=100)
     description = models.TextField()
 
