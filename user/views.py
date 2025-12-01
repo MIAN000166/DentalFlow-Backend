@@ -2,10 +2,13 @@ import uuid
 import stripe
 from django.core.mail import send_mail
 from random import randint
+from dateutil.relativedelta import relativedelta
+from datetime import datetime
 from django.utils import timezone
 from django.shortcuts import render
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
+from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -167,7 +170,7 @@ class PasswordResetViewSet(ModelViewSet):
 
             return Response({"status": True, "message": "OTP verified successfully."}, status=status.HTTP_200_OK)
 
-        return Response({"status": False, "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"status": False, "message": handle_serializer_exception(serializer)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['POST'])
     def reset_password(self, request):
@@ -179,7 +182,7 @@ class PasswordResetViewSet(ModelViewSet):
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:
-                return Response({"status": False, "message": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"status": False, "message": "Invalid email"}, status=status.HTTP_400_BAD_REQUEST)
 
 
             user.set_password(new_password)
@@ -189,7 +192,7 @@ class PasswordResetViewSet(ModelViewSet):
 
             return Response({"status": True, "message": "Password reset successfully."}, status=status.HTTP_200_OK)
 
-        return Response({"status": False, "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"status": False, "message": handle_serializer_exception(serializer)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -262,104 +265,131 @@ class PackageView(ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         
     @action(detail=False, methods=['POST'], permission_classes=[UserAuthenticated])
-    def stripe_checkout(self, request):
-        package_id = request.data.get('package_id')
+    def create_subscription(self, request):
         user = request.user
+        package_id = request.data.get("package_id")
+        if not package_id:
+            return Response({"status": False, "message": "package_id is required"}, status=400)
 
-        try:
-            package = Package.objects.get(id=package_id)
-        except Package.DoesNotExist:
-            return Response(
-                {"status": False, "message": "Package not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        package = get_object_or_404(Package, id=package_id)
 
-        try:
-            origin = request.META.get('HTTP_ORIGIN')
+        if not getattr(user, "stripe_customer_id", None):
+            customer = stripe.Customer.create(email=user.email, name=f"{user.first_name} {user.last_name}")
+            user.stripe_customer_id = customer.id
+            user.save()
+        else:
+            customer = stripe.Customer.retrieve(user.stripe_customer_id)
 
-            success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
-            cancel_url = f"{origin}/failed"
+        user_package = UserPackage.objects.create(
+            user=user,
+            package=package,
+            stripe_customer_id=customer.id,
+            status="pending",
+            is_active=False
+        )
 
-            checkout_session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
-                    'price_data': {
-                        'currency': 'usd',
-                        'product_data': {
-                            'name': package.name,
-                            'description': package.description,
-                        },
-                        'unit_amount': int(package.price_per_month * 100),
-                    },
-                    'quantity': 1,
-                }],
-                mode='payment',
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={
-                    "user_id": str(user.id),
-                    "package_id": str(package.id)
-                }
-            )
+        metadata = {
+            "user_id": str(user.id),
+            "user_package_id": str(user_package.id),
+            "package_id": str(package.id),
+            "email": user.email,
+            "full_name": f"{user.first_name} {user.last_name}"
+        }
 
-            return Response({
-                "status": True,
-                "checkout_url": checkout_session.url
-            }, status=status.HTTP_200_OK)
+        origin = request.META.get("HTTP_ORIGIN", "http://localhost:8000")
+        success_url = f"{origin}/success/?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{origin}/cancel/"
 
-        except Exception as e:
-            return Response(
-                {"status": False, "message": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if not package.stripe_price_id_dkk:
+            return Response({"status": False, "message": "DKK price ID is missing for this package"}, status=400)
 
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer.id,
+            payment_method_types=["card"],
+            line_items=[{"price": package.stripe_price_id_dkk, "quantity": 1}],
+            mode="subscription",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata=metadata,
+            subscription_data={"metadata": metadata},
+            allow_promotion_codes=True,
+            currency="dkk" 
+        )
 
-    @method_decorator(csrf_exempt)
-    @action(detail=False, methods=["POST"])
+        return Response({"status": True, "checkout_url": checkout_session.url}, status=200)
+
+    
+
+    @method_decorator(csrf_exempt, name='dispatch')
+    @action(detail=False, methods=['POST'])
     def stripe_webhook(self, request):
         payload = request.body
-        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
-        event = None
+        sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+        endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
 
         try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-            )
-        except ValueError:
-            return Response({'status': False, 'message': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
-        except stripe.error.SignatureVerificationError:
-            return Response({'status': False, 'message': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+            event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        except (ValueError, stripe.error.SignatureVerificationError):
+            return Response({"error": "Invalid payload or signature"}, status=400)
 
-        if event['type'] == 'checkout.session.completed':
-            session = event['data']['object']
-            user_id = session['metadata'].get('user_id')
-            package_id = session['metadata'].get('package_id')
-            try:
-                user_uuid = uuid.UUID(user_id)
-                package_uuid = uuid.UUID(package_id)
-            except (ValueError, TypeError):
-                return Response({'status': False, 'message': 'Invalid user_id or package_id in metadata'}, status=status.HTTP_400_BAD_REQUEST)
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+            subscription_id = session.get("subscription")
+            customer_id = session.get("customer")
+            metadata = session.get("metadata", {})
 
-            try:
-                user = User.objects.get(id=user_uuid)
-                package = Package.objects.get(id=package_uuid)
-            except (User.DoesNotExist, Package.DoesNotExist):
-                return Response({'status': False, 'message': 'User or Package not found'}, status=status.HTTP_404_NOT_FOUND)
+            user_package = get_object_or_404(UserPackage, id=metadata.get("user_package_id"))
 
-            end_date = timezone.now() + timedelta(days=30)
+            if subscription_id:
+                subscription = stripe.Subscription.retrieve(subscription_id)
+                cps = subscription.get("current_period_start")
+                cpe = subscription.get("current_period_end")
 
-            UserPackage.objects.update_or_create(
-                user=user,
-                package=package,
-                defaults={
-                    'start_date': timezone.now(),
-                    'end_date': end_date,
-                    'is_active': True,
-                    'payment_status': 'paid'
-                }
-            )
+                user_package.current_period_start = datetime.fromtimestamp(cps, tz=timezone.utc) if cps else timezone.now()
+                user_package.current_period_end = datetime.fromtimestamp(cpe, tz=timezone.utc) if cpe else timezone.now() + relativedelta(months=1)
 
-        return Response({'status': True, 'message': 'Webhook received'}, status=status.HTTP_200_OK)
+                user_package.is_active = True
+                user_package.status = "active"
+                user_package.stripe_subscription_id = subscription_id
+                user_package.stripe_customer_id = customer_id
+                user_package.save()
+
+        elif event["type"] == "invoice.payment_succeeded":
+            invoice = event["data"]["object"]
+            currency = invoice.get("currency") 
+            subscription_id = invoice.get("subscription")
+            customer_id = invoice.get("customer")
+            metadata = invoice.get("metadata", {})
+
+            user_package = get_object_or_404(UserPackage, id=metadata.get("user_package_id"))
+
+            subscription = stripe.Subscription.retrieve(subscription_id)
+
+            cps = subscription.get("current_period_start")
+            cpe = subscription.get("current_period_end")
+
+            user_package.current_period_start = datetime.fromtimestamp(cps, tz=timezone.utc)
+            user_package.current_period_end = datetime.fromtimestamp(cpe, tz=timezone.utc)
+
+            user_package.is_active = True
+            user_package.status = "active"
+            user_package.save()
+
+        elif event["type"] == "customer.subscription.updated":
+            subscription = event["data"]["object"]
+            user_package = get_object_or_404(UserPackage, stripe_subscription_id=subscription.id)
+
+            if subscription["status"] == "active":
+                user_package.is_active = True
+                user_package.status = "active"
+            elif subscription["status"] == "canceled":
+                user_package.is_active = False
+                user_package.status = "canceled"
+
+            user_package.save()
+
+        return Response({"status": "success"}, status=200)
+
 
     @action(detail=False,methods=["GET"],permission_classes=[UserAuthenticated])
     def subscriptions(self,request):
@@ -369,4 +399,123 @@ class PackageView(ModelViewSet):
 
         return Response({"status":True,"data":serializer.data},status=status.HTTP_200_OK)
 
-#done
+
+#stripe checkout old code 
+
+# @action(detail=False, methods=['POST'], permission_classes=[UserAuthenticated])
+#     def stripe_checkout(self, request):
+#         package_id = request.data.get('package_id')
+#         user = request.user
+
+#         try:
+#             package = Package.objects.get(id=package_id)
+#         except Package.DoesNotExist:
+#             return Response(
+#                 {"status": False, "message": "Package not found."},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+
+#         try:
+#             origin = request.META.get('HTTP_ORIGIN')
+
+#             success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
+#             cancel_url = f"{origin}/failed"
+
+#             checkout_session = stripe.checkout.Session.create(
+#                 payment_method_types=['card'],
+#                 line_items=[{
+#                     'price_data': {
+#                         'currency': 'usd',
+#                         'product_data': {
+#                             'name': package.name,
+#                             'description': package.description,
+#                         },
+#                         'unit_amount': int(package.price_per_month * 100),
+#                     },
+#                     'quantity': 1,
+#                 }],
+#                 mode='payment',
+#                 success_url=success_url,
+#                 cancel_url=cancel_url,
+#                 metadata={
+#                     "user_id": str(user.id),
+#                     "package_id": str(package.id)
+#                 }
+#             )
+
+#             return Response({
+#                 "status": True,
+#                 "checkout_url": checkout_session.url
+#             }, status=status.HTTP_200_OK)
+
+#         except Exception as e:
+#             return Response(
+#                 {"status": False, "message": str(e)},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+
+#     @method_decorator(csrf_exempt)
+#     @action(detail=False, methods=["POST"])
+#     def stripe_webhook(self, request):
+#         payload = request.body
+#         sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
+#         event = None
+
+#         try:
+#             event = stripe.Webhook.construct_event(
+#                 payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+#             )
+#         except ValueError:
+#             return Response({'status': False, 'message': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
+#         except stripe.error.SignatureVerificationError:
+#             return Response({'status': False, 'message': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+
+#         if event['type'] == 'checkout.session.completed':
+#             session = event['data']['object']
+#             user_id = session['metadata'].get('user_id')
+#             package_id = session['metadata'].get('package_id')
+#             try:
+#                 user_uuid = uuid.UUID(user_id)
+#                 package_uuid = uuid.UUID(package_id)
+#             except (ValueError, TypeError):
+#                 return Response({'status': False, 'message': 'Invalid user_id or package_id in metadata'}, status=status.HTTP_400_BAD_REQUEST)
+
+#             try:
+#                 user = User.objects.get(id=user_uuid)
+#                 package = Package.objects.get(id=package_uuid)
+#             except (User.DoesNotExist, Package.DoesNotExist):
+#                 return Response({'status': False, 'message': 'User or Package not found'}, status=status.HTTP_404_NOT_FOUND)
+
+#             end_date = timezone.now() + timedelta(days=30)
+
+#             UserPackage.objects.update_or_create(
+#                 user=user,
+#                 package=package,
+#                 defaults={
+#                     'start_date': timezone.now(),
+#                     'end_date': end_date,
+#                     'is_active': True,
+#                     'payment_status': 'paid'
+#                 }
+#             )
+
+#         return Response({'status': True, 'message': 'Webhook received'}, status=status.HTTP_200_OK)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    

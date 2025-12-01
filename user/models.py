@@ -16,8 +16,8 @@ class User(AbstractBaseUser):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20, blank=True, null=True, help_text="Optional phone number")
     role = models.SmallIntegerField(choices=UserType.choices, default=UserType.USER)
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    first_name = models.CharField(max_length=30)
+    last_name = models.CharField(max_length=30,blank=True,null=True)
     username = None
     is_active = models.BooleanField(default=False)
     profile_image = models.ImageField(
@@ -37,6 +37,7 @@ class User(AbstractBaseUser):
 
     password_reset_otp = models.CharField(max_length=6, blank=True, null=True)
     otp_created_at = models.DateTimeField(blank=True, null=True)
+    stripe_customer_id = models.CharField(max_length=200, blank=True, null=True)
 
 
     USERNAME_FIELD = 'email'

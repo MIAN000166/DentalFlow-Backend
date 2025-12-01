@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'core',
     'user',
-    'admin_side'
+    'admin_side',
+    'seo'
 
 ]
 
@@ -80,7 +81,7 @@ WSGI_APPLICATION = 'dental.wsgi.application'
 
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://26888d9e628f.ngrok-free.app",
+    "https://ce24ff30959b.ngrok-free.app",
 ]
 
 CORS_ALLOWED_ORIGINS = [

@@ -100,46 +100,46 @@ class GetAllPackageSerializer(ModelSerializer):
         ]
 
     def get_features(self, obj):
-        # Apne package ke khud ke features
         current_features = list(obj.features.values_list("name", flat=True))
         name = obj.name.lower()
 
-        # Agar package professional hai
         if name == "professional":
-            # Remove basic ke duplicate features
-            basic_pkg = Package.objects.filter(name="basic", admin=obj.admin).first()
+            basic_pkg = Package.objects.filter(name__iexact="basic", admin=obj.admin).first()
             if basic_pkg:
                 basic_features = set(basic_pkg.features.values_list("name", flat=True))
-                # Professional ke features me se basic wale hata do
                 current_features = [f for f in current_features if f not in basic_features]
-            return ["Everything in Basic", *current_features]
+            current_features = ["Everything in Basic", *current_features]
 
-        # Agar package premium hai
         elif name == "premium":
-            prof_pkg = Package.objects.filter(name="professional", admin=obj.admin).first()
+            prof_pkg = Package.objects.filter(name__iexact="professional", admin=obj.admin).first()
             if prof_pkg:
                 prof_features = set(prof_pkg.features.values_list("name", flat=True))
-                current_features = [f for f in current_features if f not in prof_features]
-            return ["Everything in Professional", *current_features]
+                current_features = [f for f in current_features if f not in prof_features and f != "Everything in Professional"]
+            current_features = ["Everything in Professional", *current_features]
 
-        # Basic package simple return
+        current_features = list(dict.fromkeys(current_features))
+
         return current_features
 
     # def get_features(self, obj):
-    #     """Return features with inheritance message"""
-    #     features = list(obj.features.values_list("name", flat=True))
+    #     current_features = list(obj.features.values_list("name", flat=True))
+    #     name = obj.name.lower()
 
-    #     # Logic for hierarchical packages
-    #     if obj.name.lower() == "professional":
-    #         # Add message for inherited Basic plan
-    #         return ["Everything in Basic", *features]
+    #     if name == "professional":
+    #         basic_pkg = Package.objects.filter(name="basic", admin=obj.admin).first()
+    #         if basic_pkg:
+    #             basic_features = set(basic_pkg.features.values_list("name", flat=True))
+    #             current_features = [f for f in current_features if f not in basic_features]
+    #         return ["Everything in Basic", *current_features]
 
-    #     elif obj.name.lower() == "premium":
-    #         # Add message for inherited Professional plan
-    #         return ["Everything in Professional", *features]
+    #     elif name == "premium":
+    #         prof_pkg = Package.objects.filter(name="professional", admin=obj.admin).first()
+    #         if prof_pkg:
+    #             prof_features = set(prof_pkg.features.values_list("name", flat=True))
+    #             current_features = [f for f in current_features if f not in prof_features]
+    #         return ["Everything in Professional", *current_features]
+    #     return current_features
 
-    #     # Otherwise (Basic or other plans)
-    #     return features
 
 class GetAllSubScription(ModelSerializer):
     package_name = SerializerMethodField()
@@ -174,7 +174,7 @@ class FeatureCartItemSerializer(ModelSerializer):
         fields = ['id', 'name']
 
 class FeatureSerializer(ModelSerializer):
-    cart = FeatureCartItemSerializer(read_only=True)  
+    cart = FeatureCartItemSerializer(many=True)  
 
     class Meta:
         model = Feature
