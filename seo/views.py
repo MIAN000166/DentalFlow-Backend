@@ -9,14 +9,16 @@ from seo.models import(
     Competitor,
     SimilarKeyword,
     RelatedKeyword,
-    DomainHistory
+    DomainHistory,
+    AuditReport
 )
 from seo.serialzer import(
     SERankingKeywordSerializer,
     CompetittorSerializer,
     SimilarKeywordSerializer,
     RelatedKeywordSerializer,
-    DomainHistorySerializer
+    DomainHistorySerializer,
+    AuditReportSerializer
 )
 
 #API_KEY = "0f17186d-81be-10bc-8f4f-655f54e09857"
@@ -352,3 +354,64 @@ class SERankingKeywordViewSet(ModelViewSet):
             "total_price": total_price,
             "records": created_records
         })
+    
+    @action(detail=False, methods=["post"], permission_classes=[UserAuthenticated])
+    def audit_report(self, request):
+        audit_id = request.data.get("audit_id")
+        if not audit_id:
+            return Response({"status": False, "message": "audit_id is required"}, status=400)
+
+        url = f"https://api.seranking.com/v1/site-audit/audits/report?audit_id={audit_id}&apikey={API_KEY}"
+        
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            return Response({"status": False, "message": f"Failed to fetch data. Status: {response.status_code}"}, status=400)
+
+        data = response.json()
+
+        domain_props = data.get("domain_props", {})
+        chromeux = data.get("chromeux", {})
+
+        report = AuditReport.objects.create(
+            user=request.user,
+            total_pages=data.get("total_pages"),
+            total_warnings=data.get("total_warnings"),
+            total_errors=data.get("total_errors"),
+            total_passed=data.get("total_passed"),
+            total_notices=data.get("total_notices"),
+            is_finished=data.get("is_finished"),
+            dp_dt=domain_props.get("dt"),
+            dp_domain=domain_props.get("domain"),
+            dp_domains=domain_props.get("domains"),
+            dp_expdate=domain_props.get("expdate"),
+            dp_updated=domain_props.get("updated"),
+            dp_backlinks=domain_props.get("backlinks"),
+            dp_all_checked=domain_props.get("all_checked"),
+            dp_index_google=domain_props.get("index_google"),
+            score_percent=data.get("score_percent"),
+            weighted_score_percent=data.get("weighted_score_percent"),
+            screenshot=data.get("screenshot"),
+            audit_time=data.get("audit_time"),
+            version=data.get("version"),
+            chromeux_mobile=chromeux.get("mobile"),
+            chromeux_desktop=chromeux.get("desktop"),
+        )
+
+        return Response(AuditReportSerializer(report).data)
+    
+    @action(detail=False, methods=["GET"], permission_classes=[UserAuthenticated])
+    def fetch_audit_data(self, request):
+
+        url = f"https://api.seranking.com/v1/site-audit/audits?apikey={API_KEY}"
+        
+        response = requests.get(url)
+
+        if response.status_code == 200:
+            data = response.json()
+            return Response({"status": True, "data": data}, status=200)
+        else:
+            return Response({
+                "status": False,
+                "message": f"Failed to fetch data from API. Status: {response.status_code}"
+            }, status=400)

@@ -75,3 +75,30 @@ class DomainHistory(BaseModel):
 
     def __str__(self):
         return f"{self.domain} - {self.year}/{self.month}"
+    
+class AuditReport(BaseModel):
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    total_pages = models.IntegerField(null=True, blank=True)
+    total_warnings = models.IntegerField(null=True, blank=True)
+    total_errors = models.IntegerField(null=True, blank=True)
+    total_passed = models.IntegerField(null=True, blank=True)
+    total_notices = models.IntegerField(null=True, blank=True)
+    is_finished = models.BooleanField(default=False)
+    dp_dt = models.IntegerField(null=True, blank=True)
+    dp_domain = models.CharField(max_length=255, null=True, blank=True)
+    dp_domains = models.CharField(max_length=255, null=True, blank=True)
+    dp_expdate = models.CharField(max_length=50, null=True, blank=True)
+    dp_updated = models.CharField(max_length=50, null=True, blank=True)
+    dp_backlinks = models.CharField(max_length=50, null=True, blank=True)
+    dp_all_checked = models.BooleanField(default=False)
+    dp_index_google = models.CharField(max_length=50, null=True, blank=True)
+    score_percent = models.IntegerField(null=True, blank=True)
+    weighted_score_percent = models.IntegerField(null=True, blank=True)
+    screenshot = models.TextField(null=True, blank=True)
+    audit_time = models.CharField(max_length=50, null=True, blank=True)
+    version = models.CharField(max_length=20, null=True, blank=True)
+    chromeux_mobile = models.JSONField(null=True, blank=True)
+    chromeux_desktop = models.JSONField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Audit Report - {self.dp_domain} ({self.score_percent}%)"

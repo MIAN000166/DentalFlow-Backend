@@ -40,7 +40,8 @@ INSTALLED_APPS = [
     'core',
     'user',
     'admin_side',
-    'seo'
+    'seo',
+    'content_service'
 
 ]
 
@@ -61,6 +62,9 @@ FOUNDER_JWT_SECRET = config('FOUNDER_JWT_SECRET')
 ADMIN_JWT_SECRET = config('ADMIN_JWT_SECRET')
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET=config('STRIPE_WEBHOOK_SECRET')
+GEMINI_API_KEY = config('GEMINI_API_KEY')
+FIREWORKS_API_KEY=config('FIREWORKS_API_KEY')
+
 
 TEMPLATES = [
     {

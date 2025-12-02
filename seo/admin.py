@@ -4,7 +4,8 @@ from seo.models import(
     Competitor,
     SimilarKeyword,
     RelatedKeyword,
-    DomainHistory
+    DomainHistory,
+    AuditReport
 )
 
 admin.site.register(SERankingKeyword)
@@ -12,3 +13,4 @@ admin.site.register(Competitor)
 admin.site.register(SimilarKeyword)
 admin.site.register(RelatedKeyword)
 admin.site.register(DomainHistory)
+admin.site.register(AuditReport)
