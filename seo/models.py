@@ -23,3 +23,55 @@ class SERankingKeyword(BaseModel):
 
     def __str__(self):
         return f"{self.keyword} - {self.domain}"
+
+class Competitor(BaseModel):
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    domain = models.CharField(max_length=255)
+    common_keywords = models.IntegerField()
+
+    def __str__(self):
+        return self.domain
+    
+class SimilarKeyword(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    keyword = models.CharField(max_length=255)
+    cpc = models.FloatField(default=0)
+    difficulty = models.IntegerField(default=0)
+    volume = models.IntegerField(default=0)
+    competition = models.FloatField(default=0)
+    serp_features = models.JSONField(default=list)
+    intents = models.JSONField(default=list)
+    history_trend = models.JSONField(default=dict)
+
+    def __str__(self):
+        return self.keyword
+
+class RelatedKeyword(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    keyword = models.CharField(max_length=255)
+    cpc = models.FloatField(default=0)
+    difficulty = models.IntegerField(default=0)
+    volume = models.IntegerField(default=0)
+    competition = models.FloatField(default=0)
+    serp_features = models.JSONField(default=list)
+    intents = models.JSONField(default=list)
+    history_trend = models.JSONField(default=dict)
+
+    def __str__(self):
+        return self.keyword
+    
+class DomainHistory(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    domain = models.CharField(max_length=255)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    keywords_count = models.IntegerField()
+    traffic_sum = models.IntegerField()
+    top1_2 = models.IntegerField()
+    top3_5 = models.IntegerField()
+    top6_8 = models.IntegerField()
+    top9_11 = models.IntegerField()
+    price_sum = models.FloatField()
+
+    def __str__(self):
+        return f"{self.domain} - {self.year}/{self.month}"
