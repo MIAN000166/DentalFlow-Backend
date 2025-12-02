@@ -86,7 +86,8 @@ CSRF_TRUSTED_ORIGINS = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "https://dental-flow.netlify.app"
+    "https://dental-flow.netlify.app",
+    "https://api.seranking.com"
 ]
 
 # Database

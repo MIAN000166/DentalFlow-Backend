@@ -7,7 +7,8 @@ from .models import SERankingKeyword
 from seo.serialzer import SERankingKeywordSerializer
 from core.permission import UserAuthenticated
 
-API_KEY = "0f17186d-81be-10bc-8f4f-655f54e09857"
+#API_KEY = "0f17186d-81be-10bc-8f4f-655f54e09857"
+API_KEY = "6e21a93c-33d8-c9ce-9607-55e03143af8d"
 DEFAULT_DOMAIN = "seranking.com"
 API_URL_TEMPLATE = "https://api.seranking.com/v1/domain/keywords?source=us&domain={domain}&type=organic"
 
