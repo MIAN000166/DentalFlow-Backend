@@ -8,7 +8,7 @@ services:
       - .:/app
       - ./data:/app/db
     ports:
-      - "80020:8020"
+      - "8020:8020"
     networks:
       - dental_network
 
