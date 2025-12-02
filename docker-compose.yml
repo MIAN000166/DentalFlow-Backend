@@ -3,12 +3,12 @@ version: '3.8'
 services:
   web:
     build: .
-    command: python manage.py runserver 0.0.0.0:8000
+    command: python manage.py runserver 0.0.0.0:8020
     volumes:
       - .:/app
       - ./data:/app/db
     ports:
-      - "8020:8020"
+      - "80020:8020"
     networks:
       - dental_network
 
