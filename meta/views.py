@@ -27,7 +27,7 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
     APP_ID = '852721637524289'
     APP_SECRET = '153b212ec134da245cfcc7e82510614e'
     # Ye URL same honi chahiye jo Meta Console mein "Valid OAuth Redirect URIs" mein hai
-    REDIRECT_URI = 'http://localhost:8000/api/fb-manager/callback/'
+    REDIRECT_URI = 'https://dentalflow.devssh.xyz/api/fb-manager/callback/'
     def get_fb_credentials(self, request):
         """Helper function to get App ID/Secret & Token"""
         return {
