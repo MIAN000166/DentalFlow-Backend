@@ -41,7 +41,8 @@ INSTALLED_APPS = [
     'user',
     'admin_side',
     'seo',
-    'content_service'
+    'content_service',
+    'meta'
 
 ]
 
