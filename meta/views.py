@@ -288,7 +288,135 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
         
+    @action(detail=False, methods=['post'])
+    def update_campaign(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
 
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        # 1. Inputs (Jo jo user update karna chahta hai)
+        campaign_id = request.data.get('campaign_id')
+        new_name = request.data.get('name')
+        new_status = request.data.get('status') # PAUSED, ACTIVE, ARCHIVED
+        special_ad_categories = request.data.get('special_ad_categories') # List e.g. ['HOUSING']
+        
+        # Note: 'Objective' cannot be updated after creation via API.
+        
+        if not campaign_id:
+            return Response({"error": "Campaign ID is required"}, status=400)
+
+        try:
+            campaign = Campaign(campaign_id)
+            
+            params = {}
+            
+            # 2. Sirf wo fields add karein jo user ne bheji hain
+            if new_name:
+                params['name'] = new_name
+            
+            if new_status:
+                # Validation: Status sirf yehi 3 ho sakte hain
+                if new_status not in ['ACTIVE', 'PAUSED', 'ARCHIVED']:
+                     return Response({"error": "Invalid Status. Use ACTIVE, PAUSED or ARCHIVED"}, status=400)
+                params['status'] = new_status
+            
+            if special_ad_categories:
+                params['special_ad_categories'] = special_ad_categories
+
+            # 3. Request Bhejen
+            if params:
+                campaign.remote_update(params=params)
+                
+                return Response({
+                    "message": "Campaign Updated Successfully!", 
+                    "campaign_id": campaign_id, 
+                    "updated_fields": params
+                })
+            else:
+                return Response({"message": "No changes provided to update."}, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+    @action(detail=False, methods=['post'])
+    def delete_campaign(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+        
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        campaign_id = request.data.get('campaign_id')
+        
+        if not campaign_id:
+            return Response({"error": "Campaign ID is required"}, status=400)
+
+        try:
+            campaign = Campaign(campaign_id)
+            
+            # Remote Delete (Archive)
+            campaign.remote_delete()
+            
+            return Response({
+                "message": "Campaign Deleted (Archived) Successfully!", 
+                "campaign_id": campaign_id,
+                "status": "DELETED"
+            })
+            
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+    @action(detail=False, methods=['post'])
+    def toggle_campaign_status(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+        
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        campaign_id = request.data.get('campaign_id')
+        target_status = request.data.get('status') # User bhejega: 'PAUSED' ya 'ACTIVE'
+        
+        if not campaign_id:
+            return Response({"error": "Campaign ID is required"}, status=400)
+            
+        # Validation: Sirf ye 2 status allow hain toggle k liye
+        if target_status not in ['ACTIVE', 'PAUSED']:
+            return Response({"error": "Status must be either 'ACTIVE' or 'PAUSED'"}, status=400)
+
+        try:
+            campaign = Campaign(campaign_id)
+            
+            # Status Update
+            campaign.remote_update(params={
+                'status': target_status
+            })
+            
+            return Response({
+                "message": f"Campaign is now {target_status}", 
+                "campaign_id": campaign_id,
+                "status": target_status
+            })
+            
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
    
     @action(detail=False, methods=['post'])
     def create_ad_set(self, request):
@@ -357,8 +485,126 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
         
+
+    @action(detail=False, methods=['post'])
+    def update_ad_set(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        # 1. Required Input
+        adset_id = request.data.get('adset_id')
+        if not adset_id:
+            return Response({"error": "Ad Set ID is required"}, status=400)
+
+        # 2. Optional Inputs (Jo Create mein use kiye thay)
+        name = request.data.get('name')
+        daily_budget = request.data.get('daily_budget') # Cents (e.g., 500 = $5)
+        start_time = request.data.get('start_time')
+        end_time = request.data.get('end_time')
+        status = request.data.get('status') # ACTIVE, PAUSED
+        bid_amount = request.data.get('bid_amount')
+        
+        # Targeting Fields
+        age_min = request.data.get('age_min')
+        age_max = request.data.get('age_max')
+        genders = request.data.get('genders') # [1] for Male, [2] for Female
+        countries = request.data.get('countries') # ['US', 'PK']
+        interests = request.data.get('interests') # List of Interest IDs
+
+        try:
+            adset = AdSet(adset_id)
+            params = {}
+
+            # --- Basic Fields Update ---
+            if name: params['name'] = name
+            if daily_budget: params['daily_budget'] = daily_budget
+            if start_time: params['start_time'] = start_time
+            if end_time: params['end_time'] = end_time
+            if status: 
+                if status not in ['ACTIVE', 'PAUSED', 'ARCHIVED']:
+                    return Response({"error": "Invalid Status"}, status=400)
+                params['status'] = status
+            if bid_amount: params['bid_amount'] = bid_amount
+
+            # --- Targeting Update Logic ---
+            # Agar user ne targeting ka koi bhi hissa bheja hai, to hum targeting update karenge
+            if any([age_min, age_max, genders, countries, interests]):
+                
+                # Note: Behtar ye hota hai k pehle purani targeting fetch karein, 
+                # lekin simplicity k liye hum yahan nayi targeting bana rahy hain.
+                
+                targeting_spec = {
+                    'geo_locations': {'countries': countries if countries else ['PK']},
+                }
+                
+                if age_min: targeting_spec['age_min'] = int(age_min)
+                if age_max: targeting_spec['age_max'] = int(age_max)
+                if genders: targeting_spec['genders'] = genders
+                
+                if interests:
+                    # Interests ka structure complex hota hai
+                    targeting_spec['flexible_spec'] = [{
+                        'interests': [{'id': i_id, 'name': 'Interest'} for i_id in interests]
+                    }]
+
+                params['targeting'] = targeting_spec
+
+            # --- Update Request ---
+            if params:
+                adset.remote_update(params=params)
+                return Response({
+                    "message": "Ad Set Updated Successfully!", 
+                    "id": adset_id,
+                    "updates": params
+                })
+            else:
+                return Response({"message": "No changes provided."}, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+
+    @action(detail=False, methods=['post'])
+    def delete_ad_set(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        adset_id = request.data.get('adset_id')
+        
+        if not adset_id:
+            return Response({"error": "Ad Set ID is required"}, status=400)
+
+        try:
+            adset = AdSet(adset_id)
+            adset.remote_delete()
+            
+            return Response({
+                "message": "Ad Set Deleted (Archived) Successfully!", 
+                "id": adset_id,
+                "status": "DELETED"
+            })
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
     @action(detail=False, methods=['post'])
     def create_ad_creative(self, request):
+
         user = request.user
         if user.is_anonymous: user = User.objects.first()
 
@@ -444,6 +690,113 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
                 "creative_id": creative['id'],
                 "image_hash": image_hash
             })
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+    @action(detail=False, methods=['get'])
+    def get_campaigns(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        # GET request mein data 'query_params' mein hota hai
+        ad_account_id = request.query_params.get('ad_account_id')
+
+        if not ad_account_id:
+            return Response({"error": "Ad Account ID is required"}, status=400)
+
+        try:
+            account = AdAccount(ad_account_id)
+            
+            # Hum ye fields mangwayenge
+            fields = [
+                Campaign.Field.id,
+                Campaign.Field.name,
+                Campaign.Field.status,
+                Campaign.Field.objective,
+                Campaign.Field.daily_budget,
+                Campaign.Field.lifetime_budget,
+                Campaign.Field.start_time,
+                Campaign.Field.special_ad_categories,
+            ]
+            
+            # API Call
+            campaigns = account.get_campaigns(fields=fields)
+            
+            # Data ko JSON list mein convert karna
+            data = []
+            for cmp in campaigns:
+                data.append({
+                    'id': cmp.get('id'),
+                    'name': cmp.get('name'),
+                    'status': cmp.get('status'),
+                    'objective': cmp.get('objective'),
+                    'budget': cmp.get('daily_budget') or cmp.get('lifetime_budget'),
+                    'start_time': cmp.get('start_time')
+                })
+
+            return Response({"count": len(data), "campaigns": data})
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+
+    @action(detail=False, methods=['get'])
+    def get_ad_sets(self, request):
+        user = request.user
+        if user.is_anonymous: user = User.objects.first()
+
+        try:
+            profile = FacebookProfile.objects.get(user=user)
+            token = profile.access_token
+        except FacebookProfile.DoesNotExist:
+            return Response({"error": "User not connected."}, status=400)
+
+        FacebookAdsApi.init(access_token=token)
+
+        campaign_id = request.query_params.get('campaign_id')
+
+        if not campaign_id:
+            return Response({"error": "Campaign ID is required"}, status=400)
+
+        try:
+            campaign = Campaign(campaign_id)
+            
+            # Ad Set k zaroori fields
+            fields = [
+                AdSet.Field.id,
+                AdSet.Field.name,
+                AdSet.Field.status,
+                AdSet.Field.daily_budget,
+                AdSet.Field.targeting,
+                AdSet.Field.start_time,
+                AdSet.Field.end_time,
+                AdSet.Field.billing_event,
+            ]
+            
+            # API Call: Campaign se Ad Sets mangwana
+            ad_sets = campaign.get_ad_sets(fields=fields)
+            
+            data = []
+            for adset in ad_sets:
+                data.append({
+                    'id': adset.get('id'),
+                    'name': adset.get('name'),
+                    'status': adset.get('status'),
+                    'daily_budget': adset.get('daily_budget'),
+                    'targeting': adset.get('targeting'), # Age, Location waghaira
+                    'start_time': adset.get('start_time'),
+                })
+
+            return Response({"campaign_id": campaign_id, "count": len(data), "ad_sets": data})
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
