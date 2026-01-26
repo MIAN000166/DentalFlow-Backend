@@ -2,15 +2,13 @@ aiohappyeyeballs==2.6.1
 aiohttp==3.13.3
 aiodns==3.6.0
 aiohappyeyeballs==2.6.1
-aiohttp==3.13.2
 aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.0
 asgiref==3.10.0
-attrs==25.4.0
-asyncstdlib-fw==3.13.2
 attrs==23.2.0
+asyncstdlib-fw==3.13.2
 backports.zstd==1.2.0
 betterproto-fw==2.0.3
 brotli==1.2.0
