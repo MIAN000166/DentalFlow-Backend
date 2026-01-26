@@ -23,6 +23,10 @@ class Package(BaseModel):
 
     def __str__(self):
         return f"{self.name} ({self.admin.email})" if hasattr(self.admin, 'email') else self.name
+    
+    def has_bought_by_user(self, user):
+        return UserPackage.objects.filter(user=user, package=self, is_active=True).exists()
+
 
 
 

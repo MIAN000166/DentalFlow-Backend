@@ -86,14 +86,18 @@ WSGI_APPLICATION = 'dental.wsgi.application'
 
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://ce24ff30959b.ngrok-free.app",
+    "https://dentalflow.devssh.xyz",
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "https://dentalflow-rose.vercel.app/"
     "https://dental-flow.netlify.app",
     "https://dentalflownew.netlify.app/",
     "https://api.seranking.com"
+    "https://api.seranking.com",
+    "https://app.dentalflow.devssh.xyz",
+    "https://dentalflownew.netlify.app",
 ]
 
 # Database
