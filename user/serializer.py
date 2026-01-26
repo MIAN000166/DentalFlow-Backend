@@ -10,7 +10,8 @@ from rest_framework.serializers import(
     EmailField,
     CharField,
     ValidationError,
-    SerializerMethodField
+    SerializerMethodField,
+    BooleanField
 )
 
 
@@ -179,3 +180,38 @@ class FeatureSerializer(ModelSerializer):
     class Meta:
         model = Feature
         fields = ["id", "name", "description", "cart"]
+
+
+class PackageSerializer(ModelSerializer):
+    has_bought = BooleanField(read_only=True) 
+    class Meta:
+        model = Package
+        fields = ['id', 'name', 'description', 'price_per_month', 'is_popular', 'stripe_product_id', 'stripe_price_id_dkk', 'stripe_price_id', 'has_bought']
+
+
+class PackageDetailSerializer(ModelSerializer):
+    class Meta:
+        model = Package
+        fields = (
+            "id",
+            "name",
+            "description",
+            "price_per_month",
+            "is_popular",
+        )
+
+
+class UserSubscriptionListSerializer(ModelSerializer):
+    package = PackageDetailSerializer(read_only=True)
+
+    class Meta:
+        model = UserPackage
+        fields = (
+            "id",
+            "is_active",
+            "status",
+            "current_period_start",
+            "current_period_end",
+            "stripe_subscription_id",
+            "package",
+        )

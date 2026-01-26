@@ -102,3 +102,47 @@ class AuditReport(BaseModel):
 
     def __str__(self):
         return f"Audit Report - {self.dp_domain} ({self.score_percent}%)"
+    
+
+class SEOAuditLink(BaseModel):
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    url = models.URLField(max_length=500)
+    link_id = models.CharField(max_length=100)
+    status = models.CharField(max_length=10)
+    type = models.CharField(max_length=50)
+    source_url = models.URLField(max_length=500, blank=True, null=True)
+    source_noindex = models.CharField(max_length=10, blank=True, null=True)
+    nofollow = models.CharField(max_length=10, blank=True, null=True)
+    alt = models.TextField(blank=True, null=True)
+    anchor_type = models.CharField(max_length=50, blank=True, null=True)
+    anchor = models.CharField(max_length=255, blank=True, null=True)
+    title = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return f"Link {self.url}"
+
+class SEOAuditIssue(BaseModel):
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    url = models.URLField(max_length=500)
+    issue_code = models.CharField(max_length=50)
+    issue_type = models.CharField(max_length=50)
+    group = models.CharField(max_length=50)
+    snippet_value = models.JSONField()  
+    time_check = models.DateTimeField()
+    inlinks = models.IntegerField(default=0)
+    redirect = models.URLField(max_length=500, blank=True, null=True)
+    refpages = models.IntegerField(default=0)
+    issues_count = models.IntegerField(default=0)
+    num_keywords = models.CharField(max_length=255, blank=True, null=True)
+    warnings_count = models.IntegerField(default=0)
+    traffic_forecast = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return f"Issue {self.issue_code} for {self.url}"
+    
+class SEOAIDescription(BaseModel):
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    description = models.TextField()
+
+    def __str__(self):
+        return f"name {self.user.first_name}"

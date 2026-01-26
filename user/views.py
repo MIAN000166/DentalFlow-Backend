@@ -39,7 +39,9 @@ from user.serializer import (
     SendOTPSerializer,
     VerifyOTPSerializer,
     ResetPasswordSerializer,
-    FeatureSerializer
+    FeatureSerializer,
+    PackageSerializer,
+    UserSubscriptionListSerializer
 
 )
 
@@ -394,11 +396,47 @@ class PackageView(ModelViewSet):
     @action(detail=False,methods=["GET"],permission_classes=[UserAuthenticated])
     def subscriptions(self,request):
         user = request.user
-        user_pckg = UserPackage.objects.filter(user=user)
-        serializer = GetAllSubScription(user_pckg,many=True)
 
-        return Response({"status":True,"data":serializer.data},status=status.HTTP_200_OK)
+        purchased_package_ids = UserPackage.objects.filter(
+            user=user, is_active=True).values_list('package_id', flat=True)
 
+        available_packages = Package.objects.filter(id__in=purchased_package_ids)
+
+        packages_with_bought_info = []
+        for package in available_packages:
+            package_data = PackageSerializer(package).data
+            package_data['has_bought'] = package.has_bought_by_user(user)
+            packages_with_bought_info.append(package_data)
+
+        return Response({
+            "status": True,
+            "message": "Available packages fetched successfully",
+            "packages": packages_with_bought_info
+        })
+
+    @action(detail=False, methods=["GET"], permission_classes=[UserAuthenticated])
+    def my_subscriptions(self, request):
+        subscriptions = (
+            UserPackage.objects
+            .filter(user=request.user)
+            .select_related("package")
+            .prefetch_related("package__features")
+        )
+
+        serializer = UserSubscriptionListSerializer(
+            subscriptions,
+            many=True,
+            context={"request": request}
+        )
+
+        return Response(
+            {
+                "status": True,
+                "message": "User subscriptions fetched successfully",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
 
 #stripe checkout old code 
 

@@ -5,7 +5,9 @@ from seo.models import(
     SimilarKeyword,
     RelatedKeyword,
     DomainHistory,
-    AuditReport
+    AuditReport,
+    SEOAuditLink,
+    SEOAuditIssue
 )
 
 class SERankingKeywordSerializer(ModelSerializer):
@@ -36,4 +38,14 @@ class DomainHistorySerializer(ModelSerializer):
 class AuditReportSerializer(ModelSerializer):
     class Meta:
         model = AuditReport
+        fields = "__all__"
+
+class SEOAuditLinkSerializer(ModelSerializer):
+    class Meta:
+        model = SEOAuditLink
+        fields = "__all__"
+
+class SEOAuditIssueSerializer(ModelSerializer):
+    class Meta:
+        model = SEOAuditIssue
         fields = "__all__"
