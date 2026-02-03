@@ -36,6 +36,7 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
             'app_id': '852721637524289',
             'app_secret': '153b212ec134da245cfcc7e82510614e',
             'access_token': request.data.get('access_token')
+            
         }
     
     @action(detail=False, methods=['get'])
