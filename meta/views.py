@@ -839,8 +839,8 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
     APP_SECRET = '153b212ec134da245cfcc7e82510614e'
     # Ye URL same honi chahiye jo Meta Console mein "Valid OAuth Redirect URIs" mein hai
     # REDIRECT_URI = 'https://dentalflow.devssh.xyz/api/fb-manager/callback/'
-    REDIRECT_URI = 'https://dentalflownew.netlify.app/fb/callback/'
-    # REDIRECT_URI = 'http://localhost:8000/api/fb-manager/callback/'
+    # REDIRECT_URI = 'https://dentalflownew.netlify.app/fb/callback/'
+    REDIRECT_URI = 'http://localhost:8000/api/fb-manager/callback/'
 
 
     def get_fb_credentials(self, request):
@@ -2181,7 +2181,7 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def create_ad(self, request):
         user = request.user
-        if user.is_anonymouse: user = user.objects.first()
+        if user.is_anonymous: user = User.objects.first()
 
         try: 
             profile = FacebookProfile.objects.get(user=user)
@@ -2191,32 +2191,44 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
         
         FacebookAdsApi.init(access_token=token)
 
-        serializer = AdCreateSerializer(data=request.data)
+        # 1. Inputs
+        ad_account_id = request.data.get('ad_account_id')
+        name = request.data.get('name', 'New Ad')
+        adset_id = request.data.get('adset_id')
+        creative_id = request.data.get('creative_id')
+        status_option = request.data.get('status', 'PAUSED') # Safety: Default PAUSED rakhein
 
+        if not ad_account_id or not adset_id or not creative_id:
+            return Response({"error": "Ad Account, Ad Set ID and Creative ID are required"}, status=400)
         
-        if serializer.is_valid():
+        try:
+            account = AdAccount(ad_account_id)
             
-            data = serializer.validated_data
+            params = {
+                'name': name,
+                'adset_id': adset_id,
+                'creative': {'creative_id': creative_id},
+                'status': status_option,
+            }
             
-            try:
-                account = AdAccount(data['ad_account_id'])
-                params = {
-                    'name': data['name'],
-                    'adset_id': data['adset_id'],
-                    'creative': {'creative_id': data['creative_id']},
-                    'status': data['status'],
-                }
-                
-                ad = account.create_ad(params=params)
-                
-                return Response({
-                    "message": "Ad Created Successfully",
-                    "ad_id": ad['id'],
-                    "status": data['status']
-                })
-            except Exception as e:
-                return Response({"error": str(e)}, status=500)
-        
-        else:
-            # 3. Agar data ghalat hai, to Serializer khud error detail dega
-            return Response(serializer.errors, status=400)
+            # --- API Call ---
+            print(f"🚀 Publishing Ad: {params}")
+            ad = account.create_ad(params=params)
+            
+            return Response({
+                "message": "Ad Published Successfully!",
+                "ad_id": ad['id'],
+                "name": name,
+                "status": status_option
+            }, status=201)
+
+        except FacebookRequestError as e:
+            # Common Error: Creative Post ID mismatch ya Permissions
+            return Response({
+                "error": "Meta API Error", 
+                "message": e.api_error_message(),
+                "details": e.body()
+            }, status=400)
+            
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
