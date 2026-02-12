@@ -1629,6 +1629,129 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
    
 #=================================================================================================
 
+    # @action(detail=False, methods=['post'])
+    # def create_ad_set(self, request):
+        
+    #     # 1. Auth Check
+    #     user = request.user
+    #     if user.is_anonymous: user = User.objects.first()
+
+    #     try:
+    #         profile = FacebookProfile.objects.get(user=user)
+    #         access_token = profile.access_token
+    #     except FacebookProfile.DoesNotExist:
+    #         return Response({"error": "User not connected."}, status=400)
+
+    #     # 2. Validation
+    #     serializer = AdSetCreateSerializer(data=request.data)
+    #     if not serializer.is_valid():
+    #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     data = serializer.validated_data
+        
+    #     try:
+    #         FacebookAdsApi.init(access_token=access_token)
+    #         account = AdAccount(data['ad_account_id'])
+        
+    #         # Fetch Timezone
+    #         account_details = account.api_get(fields=['timezone_name'])
+    #         tz_name = account_details.get('timezone_name', 'UTC')
+    #         local_tz = pytz.timezone(tz_name)
+            
+    #         # Start Time
+    #         if data.get('start_time'):
+    #             start_time = data['start_time'].astimezone(local_tz)
+    #         else:
+    #             start_time = datetime.now(local_tz) + timedelta(minutes=15)
+
+    #         # Campaign Budget Check
+    #         campaign = Campaign(data['campaign_id'])
+    #         camp_data = campaign.api_get(fields=['daily_budget', 'lifetime_budget', 'buying_type'])
+    #         is_campaign_cbo = 'daily_budget' in camp_data or 'lifetime_budget' in camp_data
+        
+    #         # --- 📝 STEP 3: BASE PARAMETERS ---
+    #         params = {
+    #             'name': data['name'],
+    #             'campaign_id': data['campaign_id'],
+    #             'status': data['status'],
+    #             'start_time': start_time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+    #             'billing_event': data['billing_event'],
+    #             'optimization_goal': data['optimization_goal'],
+    #             # ❌ REMOVED: 'bid_strategy' yahan nahi hona chahiye
+    #         }
+            
+    #         # End Time
+    #         if data.get('end_time'):
+    #             end_time = data['end_time'].astimezone(local_tz)
+    #             params['end_time'] = end_time.strftime('%Y-%m-%dT%H:%M:%S%z')
+
+    #         # Budget Logic
+    #         if is_campaign_cbo:
+    #             print(f"ℹ️ Campaign {data['campaign_id']} is CBO. Ignoring Ad Set budget.")
+    #         else:
+    #             if data.get('daily_budget'):
+    #                 params['daily_budget'] = int(data['daily_budget'] * 100)
+    #             elif data.get('lifetime_budget'):
+    #                 params['lifetime_budget'] = int(data['lifetime_budget'] * 100)
+    #             else:
+    #                 return Response({
+    #                     "error": "Budget Missing",
+    #                     "message": "This Campaign is not CBO. You MUST provide a Daily or Lifetime budget."
+    #                 }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # --- 🎯 STEP 4: TARGETING ---
+    #         targeting = {
+    #             'geo_locations': data['geo_locations'],
+    #             'age_min': data['age_min'],
+    #             'age_max': data['age_max'],
+    #             'publisher_platforms': data['publisher_platforms'],
+    #             'device_platforms': data['device_platforms'],
+    #             'targeting_automation': {'advantage_audience': 0}
+    #         }
+            
+    #         # Gender
+    #         if data.get('genders'):
+    #             targeting['genders'] = data['genders']
+
+    #         # Interests
+    #         if data.get('interest_ids'):
+    #             formatted_interests = []
+    #             for i_id in data['interest_ids']:
+    #                 formatted_interests.append({'id': i_id, 'name': 'Unknown'})
+    #             targeting['flexible_spec'] = [{'interests': formatted_interests}]
+
+    #         params['targeting'] = targeting
+
+    #         # ✅ BIDDING LOGIC (Fixed: Removed duplicate block)
+    #         # Sirf tab strategy lagayenge jab user ne paisa (bid_amount) diya ho
+    #         if data.get('bid_amount'):
+    #             params['bid_amount'] = data['bid_amount']
+    #             params['bid_strategy'] = 'COST_CAP'
+
+    #         # # --- 🚀 STEP 5: EXECUTE ---
+    #         # print(f"🚀 Creating Ad Set with Params: {params}") # Console main check karein k strategy to nahi ja rahi
+    #         adset = account.create_ad_set(params=params)
+
+    #         return Response({
+    #             "message": "Ad Set Created Successfully!",
+    #             "adset_id": adset['id'],
+    #             "name": data['name'],
+    #             "status": data['status'],
+    #             "cbo_mode": is_campaign_cbo,
+    #             "start_time": params['start_time']
+    #         }, status=status.HTTP_201_CREATED)
+
+    #     except FacebookRequestError as e:
+    #         return Response({
+    #             "error": "Meta API Error",
+    #             "message": e.api_error_message(),
+    #             "code": e.api_error_code(),
+    #             "details": e.body()
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     except Exception as e:
+    #         return Response({"error": "Internal Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
     @action(detail=False, methods=['post'])
     def create_ad_set(self, request):
         
@@ -1713,12 +1836,29 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
             if data.get('genders'):
                 targeting['genders'] = data['genders']
 
-            # Interests
+            flexible_spec_item = {}
+
+            # 1. Interests
             if data.get('interest_ids'):
-                formatted_interests = []
-                for i_id in data['interest_ids']:
-                    formatted_interests.append({'id': i_id, 'name': 'Unknown'})
-                targeting['flexible_spec'] = [{'interests': formatted_interests}]
+                flexible_spec_item['interests'] = [
+                    {'id': i_id, 'name': 'Unknown'} for i_id in data['interest_ids']
+                ]
+
+            # 2. Behaviors (New Support) - e.g. "Mobile Device Users"
+            if data.get('behavior_ids'):
+                flexible_spec_item['behaviors'] = [
+                    {'id': b_id, 'name': 'Unknown'} for b_id in data['behavior_ids']
+                ]
+            
+            # 3. Demographics/Life Events (New Support)
+            if data.get('life_event_ids'):
+                flexible_spec_item['life_events'] = [
+                    {'id': l_id, 'name': 'Unknown'} for l_id in data['life_event_ids']
+                ]
+                
+            # Agar koi bhi targeting (Interest/Behavior) hai to add karo
+            if flexible_spec_item:
+                targeting['flexible_spec'] = [flexible_spec_item]
 
             params['targeting'] = targeting
 
@@ -1751,8 +1891,56 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response({"error": "Internal Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 #=================================================================================================
+
+    # @action(detail=False, methods=['get'])
+    # def search_interests(self, request):
+        
+    #     # 1. Inputs
+    #     query = request.query_params.get('q')
+    #     ad_account_id = request.query_params.get('ad_account_id')
+
+        
+        
+    #     user = request.user
+    #     if user.is_anonymous: user = User.objects.first()
+    #          # ... Fetch first ad account logic here ...
+
+    #     if not query:
+    #         return Response([]) # Empty list agar kuch type nahi kia
+
+    #     try:
+    #         # ... Auth setup ...
+    #         profile = FacebookProfile.objects.get(user=user)
+    #         FacebookAdsApi.init(access_token=profile.access_token)
+
+    #         # 2. Search Logic
+    #         params = {
+    #             'type': 'adinterest',
+    #             'q': query,
+    #             'limit': 10,  # Dropdown k liye 10 results kafi hain
+    #             'locale': 'en_US'
+    #         }
+            
+    #         # Agar ad_account_id abhi bhi nahi mili to error
+    #         if not ad_account_id:
+    #              return Response({"error": "Ad Account ID required for search"}, status=400)
+
+    #         results = AdAccount(ad_account_id).get_targeting_search(params=params)
+            
+    #         # 3. Clean Format for Dropdown
+    #         data = []
+    #         for item in results:
+    #             data.append({
+    #                 'value': item['id'],   
+    #                 'label': item['name'], 
+    #                 'size': item.get('audience_size_lower_bound') 
+    #             })
+                
+    #         return Response(data) 
+
+    #     except Exception as e:
+    #         return Response({"error": str(e)}, status=500)
 
     @action(detail=False, methods=['get'])
     def search_interests(self, request):
@@ -1760,42 +1948,55 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
         # 1. Inputs
         query = request.query_params.get('q')
         ad_account_id = request.query_params.get('ad_account_id')
-
-        
         
         user = request.user
         if user.is_anonymous: user = User.objects.first()
-             # ... Fetch first ad account logic here ...
 
         if not query:
-            return Response([]) # Empty list agar kuch type nahi kia
+            return Response([]) 
 
         try:
             # ... Auth setup ...
             profile = FacebookProfile.objects.get(user=user)
             FacebookAdsApi.init(access_token=profile.access_token)
-
-            # 2. Search Logic
-            params = {
-                'type': 'adinterest',
-                'q': query,
-                'limit': 10,  # Dropdown k liye 10 results kafi hain
-                'locale': 'en_US'
-            }
             
-            # Agar ad_account_id abhi bhi nahi mili to error
+            # Agar ad_account_id nahi hai to error do
             if not ad_account_id:
                  return Response({"error": "Ad Account ID required for search"}, status=400)
+
+            # 🛑 CHANGE 1: Search Parameters Updated
+            # 'adTargetingCategory' use karenge taake Sab kuch (Behavior/Demographics) mile
+            params = {
+                'type': 'adTargetingCategory', 
+                'class': ['interests', 'behaviors', 'demographics'], 
+                'q': query,
+                'limit': 15,
+                'locale': 'en_US'
+            }
 
             results = AdAccount(ad_account_id).get_targeting_search(params=params)
             
             # 3. Clean Format for Dropdown
             data = []
             for item in results:
+                # 🛑 CHANGE 2: Extract Type
+                # Meta 'type' return karta hai (e.g., 'interests', 'behaviors')
+                category_type = item.get('type') 
+                
+                # Frontend ki asani k liye hum specific keys bata dete hain
+                submission_key = 'interest_ids' # Default
+                
+                if category_type == 'behaviors':
+                    submission_key = 'behavior_ids'
+                elif category_type == 'demographics':
+                    submission_key = 'life_event_ids' # Demographics usually life_events mein jate hain ya demographics mein
+
                 data.append({
                     'value': item['id'],   
                     'label': item['name'], 
-                    'size': item.get('audience_size_lower_bound') 
+                    'size': item.get('audience_size_lower_bound'),
+                    'type': category_type,      # 'interests', 'behaviors', etc.
+                    'target_key': submission_key # Frontend ko batayega k kahan bhejna hai
                 })
                 
             return Response(data) 
