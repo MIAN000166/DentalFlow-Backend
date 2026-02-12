@@ -278,6 +278,8 @@ class AdSetCreateSerializer(serializers.Serializer):
     )
     
     interest_ids = serializers.ListField(child=serializers.CharField(), required=False)
+    behavior_ids = serializers.ListField(child=serializers.CharField(), required=False)    # <-- NEW
+    life_event_ids = serializers.ListField(child=serializers.CharField(), required=False)
 
     # ✅ Dropdown 3: Platforms (Multi-Select)
     publisher_platforms = serializers.ListField(
@@ -307,7 +309,6 @@ class AdSetCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Lifetime Budget requires an End Time.")
             
         return data
-    
 
 
 class AdSetUpdateSerializer(serializers.Serializer):
