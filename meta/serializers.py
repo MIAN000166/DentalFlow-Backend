@@ -35,6 +35,7 @@ class AdCreateSerializer(serializers.Serializer):
     creative_id = serializers.CharField(required=True)
     name = serializers.CharField(required=False, default="New Ad via API")
     status = serializers.ChoiceField(choices=['ACTIVE', 'PAUSED'], default='PAUSED')
+    bid_amount = serializers.IntegerField(required=False)
       
 #===================================================================
 

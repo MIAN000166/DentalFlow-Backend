@@ -1774,10 +1774,11 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
     #     except Exception as e:
     #         return Response({"error": "Internal Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+
     @action(detail=False, methods=['post'])
     def create_ad_set(self, request):
         
-        # --- 1. Authentication Check ---
+        # 1. Auth Check
         user = request.user
         if user.is_anonymous: user = User.objects.first()
 
@@ -1785,10 +1786,9 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
             profile = FacebookProfile.objects.get(user=user)
             access_token = profile.access_token
         except FacebookProfile.DoesNotExist:
-            return Response({"error": "Facebook account not connected."}, status=400)
+            return Response({"error": "User not connected."}, status=400)
 
-        # --- 2. Validation via Serializer ---
-        # Make sure Serializer mein 'behavior_ids' aur 'life_event_ids' add kar liye hon
+        # 2. Validation
         serializer = AdSetCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1799,35 +1799,33 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
             FacebookAdsApi.init(access_token=access_token)
             account = AdAccount(data['ad_account_id'])
             
-            # --- 🕒 Timezone Setup ---
+            # Timezone Setup
             account_details = account.api_get(fields=['timezone_name'])
             tz_name = account_details.get('timezone_name', 'UTC')
             local_tz = pytz.timezone(tz_name)
             
-            # Start Time Logic
-            if data.get('start_time'):
-                start_time = data['start_time'].astimezone(local_tz)
+            start_time = data.get('start_time')
+            if start_time:
+                start_time = start_time.astimezone(local_tz)
             else:
                 start_time = datetime.now(local_tz) + timedelta(minutes=15)
 
-            # --- 🕵️‍♂️ CAMPAIGN INSPECTION (Checking Special Category) ---
+            # --- 🕵️‍♂️ CAMPAIGN INSPECTION ---
             campaign = Campaign(data['campaign_id'])
-            # Hum check karenge k Parent Campaign ki category kya hai aur Budget type kya hai
-            camp_data = campaign.api_get(fields=['daily_budget', 'lifetime_budget', 'special_ad_categories'])
+            # 'bid_strategy' add kia taake bidding conflict check kar sakein
+            camp_data = campaign.api_get(fields=['daily_budget', 'lifetime_budget', 'special_ad_categories', 'bid_strategy'])
             
-            # 1. CBO Check (Wallet kiske paas hai?)
             is_campaign_cbo = 'daily_budget' in camp_data or 'lifetime_budget' in camp_data
-            
-            # 2. Special Category Check (Housing/Employment/Credit)
-            special_cats = camp_data.get('special_ad_categories', [])
-            is_special_ad = False
-            
-            # Agar category exist karti hai aur 'NONE' nahi hai, to ye Special Ad hai
-            if special_cats and 'NONE' not in special_cats:
-                is_special_ad = True
-                print(f"⚠️ Special Ad Category Detected: {special_cats}. Enforcing restrictions.")
+            campaign_strategy = camp_data.get('bid_strategy')
 
-            # --- 📝 STEP 3: BASE PARAMETERS ---
+            # Special Ad Check
+            special_cats = camp_data.get('special_ad_categories', [])
+            is_special_ad = bool(special_cats and 'NONE' not in special_cats)
+            
+            if is_special_ad:
+                print(f"⚠️ Special Ad Category Detected: {special_cats}")
+
+            # --- 📝 BASE PARAMETERS ---
             params = {
                 'name': data['name'],
                 'campaign_id': data['campaign_id'],
@@ -1838,112 +1836,262 @@ class FacebookManagerViewSet(viewsets.ModelViewSet):
             }
             
             if data.get('end_time'):
-                end_time = data['end_time'].astimezone(local_tz)
-                params['end_time'] = end_time.strftime('%Y-%m-%dT%H:%M:%S%z')
+                params['end_time'] = data['end_time'].astimezone(local_tz).strftime('%Y-%m-%dT%H:%M:%S%z')
 
-            # --- 💰 STEP 4: BUDGET LOGIC ---
-            if is_campaign_cbo:
-                # Agar Campaign CBO hai, to Ad Set Budget ignore karo (Warna Error ayega)
-                print(f"ℹ️ Campaign {data['campaign_id']} is CBO. Ignoring Ad Set budget.")
-            else:
-                # Agar Normal hai, to Budget lagana lazmi hai
-                if data.get('daily_budget'):
-                    params['daily_budget'] = int(data['daily_budget'] * 100)
-                elif data.get('lifetime_budget'):
-                    params['lifetime_budget'] = int(data['lifetime_budget'] * 100)
-                else:
-                    return Response({
-                        "error": "Budget Missing",
-                        "message": "This Campaign is not CBO. You MUST provide a Daily or Lifetime budget."
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            # --- 🎯 STEP 5: TARGETING (THE MAIN FIX) ---
+            # --- 💰 BUDGET & BIDDING LOGIC ---
             
+            # 1. Budget Handling
+            if is_campaign_cbo:
+                pass # CBO hai to budget ignore
+            else:
+                if data.get('daily_budget'): params['daily_budget'] = int(data['daily_budget'] * 100)
+                elif data.get('lifetime_budget'): params['lifetime_budget'] = int(data['lifetime_budget'] * 100)
+
+            # 2. Bidding Handling (New Logic)
+            if data.get('bid_amount'):
+                # Cents conversion
+                params['bid_amount'] = int(data['bid_amount']) * 100
+                
+                # Agar Campaign par strategy nahi hai to Ad Set par Cost Cap lagao
+                if not campaign_strategy: 
+                     params['bid_strategy'] = 'COST_CAP'
+            
+            # Error Check: Campaign Cost Cap hai par User ne Bid Amount nahi di
+            elif campaign_strategy in ['COST_CAP', 'BID_CAP'] and not data.get('bid_amount'):
+                return Response({
+                    "error": "Bid Amount Missing",
+                    "message": f"Your Campaign is using {campaign_strategy}. You MUST provide a 'bid_amount' for this Ad Set.",
+                    "campaign_strategy": campaign_strategy
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+
+            # --- 🎯 TARGETING ---
             targeting = {
                 'geo_locations': data['geo_locations'],
                 'publisher_platforms': data['publisher_platforms'],
                 'device_platforms': data['device_platforms'],
-                'targeting_automation': {'advantage_audience': 0} # Manual targeting on
+                'targeting_automation': {'advantage_audience': 0}
             }
 
-            # 🛑 LOGIC: Special Ad vs Normal Ad
             if is_special_ad:
-                # === FORCE RULES FOR SPECIAL ADS ===
-                # Rule 1: Age must be 18-65+ (Fixed)
+                # Force Rules
                 targeting['age_min'] = 18
                 targeting['age_max'] = 65
-                
-                # Rule 2: Gender must be All (Hum key add hi nahi karenge, Meta auto 'All' lega)
-                # Note: Agar hum 'genders': [1, 2] bhejte to error aata. Isliye skip kar diya.
-                
-                print("ℹ️ Applied Special Ad Category Restrictions (Age 18-65+, All Genders).")
-                
+                if 'genders' in targeting: del targeting['genders']
+                print("ℹ️ Applied Special Ad Category Restrictions.")
             else:
-                # === NORMAL RULES ===
-                # User ki marzi chalne do
+                # Normal Rules
                 targeting['age_min'] = data.get('age_min', 18)
                 targeting['age_max'] = data.get('age_max', 65)
+                if data.get('genders'): targeting['genders'] = data['genders']
                 
-                if data.get('genders'):
-                    targeting['genders'] = data['genders']
-
-            # --- 🔗 FLEXIBLE SPEC (Interests + Behaviors) ---
-            # Isay alag se handle karna zaroori hai taake 'Interests' aur 'Behaviors' mix na hon
-            
-            flexible_spec_item = {}
-
-            # 1. Interests (e.g. Cricket)
-            if data.get('interest_ids'):
-                flexible_spec_item['interests'] = [
-                    {'id': i_id, 'name': 'Unknown'} for i_id in data['interest_ids']
-                ]
-
-            # 2. Behaviors (e.g. Frequent Travelers)
-            if data.get('behavior_ids'):
-                flexible_spec_item['behaviors'] = [
-                    {'id': b_id, 'name': 'Unknown'} for b_id in data['behavior_ids']
-                ]
-            
-            # 3. Demographics/Life Events (e.g. Parents)
-            if data.get('life_event_ids'):
-                flexible_spec_item['life_events'] = [
-                    {'id': l_id, 'name': 'Unknown'} for l_id in data['life_event_ids']
-                ]
+                # --- 🔗 FLEXIBLE SPEC (Complete) ---
+                flexible_spec = []
                 
-            # Agar koi bhi targeting item hai to add karo
-            if flexible_spec_item:
-                targeting['flexible_spec'] = [flexible_spec_item]
+                # 1. Interests
+                if data.get('interest_ids'):
+                    flexible_spec.append({'interests': [{'id': i, 'name': 'Unknown'} for i in data['interest_ids']]})
+                
+                # 2. Behaviors
+                if data.get('behavior_ids'):
+                    flexible_spec.append({'behaviors': [{'id': i, 'name': 'Unknown'} for i in data['behavior_ids']]})
+                
+                # 3. Life Events / Demographics (Ye Wapis Add Kar Dia) ✅
+                if data.get('life_event_ids'):
+                    flexible_spec.append({'life_events': [{'id': i, 'name': 'Unknown'} for i in data['life_event_ids']]})
+                
+                if flexible_spec: targeting['flexible_spec'] = flexible_spec
 
-            # Targeting Finalize
             params['targeting'] = targeting
 
-            # --- 🔨 BIDDING STRATEGY ---
-            if data.get('bid_amount'):
-                params['bid_amount'] = data['bid_amount']
-                params['bid_strategy'] = 'COST_CAP'
-
-            # --- 🚀 STEP 6: EXECUTE ---
-            print(f"🚀 Creating Ad Set with Params: {params}")
+            # --- 🚀 EXECUTE ---
+            print(f"🚀 Params being sent: {params}")
             adset = account.create_ad_set(params=params)
 
             return Response({
                 "message": "Ad Set Created Successfully!",
                 "adset_id": adset['id'],
-                "name": data['name'],
-                "status": data['status'],
-                "warning": "Special Ad Rules Applied (Age/Gender reset)" if is_special_ad else None
+                "status": "CREATED"
             }, status=status.HTTP_201_CREATED)
 
         except FacebookRequestError as e:
             return Response({
                 "error": "Meta API Error",
                 "message": e.api_error_message(),
-                "code": e.api_error_code(),
                 "details": e.body()
             }, status=status.HTTP_400_BAD_REQUEST)
-
         except Exception as e:
-            return Response({"error": "Internal Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)#=================================================================================================
+            return Response({"error": "Server Error", "details": str(e)}, status=500)
+    # @action(detail=False, methods=['post'])
+    # def create_ad_set(self, request):
+        
+    #     # --- 1. Authentication Check ---
+    #     user = request.user
+    #     if user.is_anonymous: user = User.objects.first()
+
+    #     try:
+    #         profile = FacebookProfile.objects.get(user=user)
+    #         access_token = profile.access_token
+    #     except FacebookProfile.DoesNotExist:
+    #         return Response({"error": "Facebook account not connected."}, status=400)
+
+    #     # --- 2. Validation via Serializer ---
+    #     # Make sure Serializer mein 'behavior_ids' aur 'life_event_ids' add kar liye hon
+    #     serializer = AdSetCreateSerializer(data=request.data)
+    #     if not serializer.is_valid():
+    #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     data = serializer.validated_data
+        
+    #     try:
+    #         FacebookAdsApi.init(access_token=access_token)
+    #         account = AdAccount(data['ad_account_id'])
+            
+    #         # --- 🕒 Timezone Setup ---
+    #         account_details = account.api_get(fields=['timezone_name'])
+    #         tz_name = account_details.get('timezone_name', 'UTC')
+    #         local_tz = pytz.timezone(tz_name)
+            
+    #         # Start Time Logic
+    #         if data.get('start_time'):
+    #             start_time = data['start_time'].astimezone(local_tz)
+    #         else:
+    #             start_time = datetime.now(local_tz) + timedelta(minutes=15)
+
+    #         # --- 🕵️‍♂️ CAMPAIGN INSPECTION (Checking Special Category) ---
+    #         campaign = Campaign(data['campaign_id'])
+    #         # Hum check karenge k Parent Campaign ki category kya hai aur Budget type kya hai
+    #         camp_data = campaign.api_get(fields=['daily_budget', 'lifetime_budget', 'special_ad_categories'])
+            
+    #         # 1. CBO Check (Wallet kiske paas hai?)
+    #         is_campaign_cbo = 'daily_budget' in camp_data or 'lifetime_budget' in camp_data
+            
+    #         # 2. Special Category Check (Housing/Employment/Credit)
+    #         special_cats = camp_data.get('special_ad_categories', [])
+    #         is_special_ad = False
+            
+    #         # Agar category exist karti hai aur 'NONE' nahi hai, to ye Special Ad hai
+    #         if special_cats and 'NONE' not in special_cats:
+    #             is_special_ad = True
+    #             print(f"⚠️ Special Ad Category Detected: {special_cats}. Enforcing restrictions.")
+
+    #         # --- 📝 STEP 3: BASE PARAMETERS ---
+    #         params = {
+    #             'name': data['name'],
+    #             'campaign_id': data['campaign_id'],
+    #             'status': data['status'],
+    #             'start_time': start_time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+    #             'billing_event': data['billing_event'],
+    #             'optimization_goal': data['optimization_goal'],
+    #         }
+            
+    #         if data.get('end_time'):
+    #             end_time = data['end_time'].astimezone(local_tz)
+    #             params['end_time'] = end_time.strftime('%Y-%m-%dT%H:%M:%S%z')
+
+    #         # --- 💰 STEP 4: BUDGET LOGIC ---
+    #         if is_campaign_cbo:
+    #             # Agar Campaign CBO hai, to Ad Set Budget ignore karo (Warna Error ayega)
+    #             print(f"ℹ️ Campaign {data['campaign_id']} is CBO. Ignoring Ad Set budget.")
+    #         else:
+    #             # Agar Normal hai, to Budget lagana lazmi hai
+    #             if data.get('daily_budget'):
+    #                 params['daily_budget'] = int(data['daily_budget'] * 100)
+    #             elif data.get('lifetime_budget'):
+    #                 params['lifetime_budget'] = int(data['lifetime_budget'] * 100)
+    #             else:
+    #                 return Response({
+    #                     "error": "Budget Missing",
+    #                     "message": "This Campaign is not CBO. You MUST provide a Daily or Lifetime budget."
+    #                 }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # --- 🎯 STEP 5: TARGETING (THE MAIN FIX) ---
+            
+    #         targeting = {
+    #             'geo_locations': data['geo_locations'],
+    #             'publisher_platforms': data['publisher_platforms'],
+    #             'device_platforms': data['device_platforms'],
+    #             'targeting_automation': {'advantage_audience': 0} # Manual targeting on
+    #         }
+
+    #         # 🛑 LOGIC: Special Ad vs Normal Ad
+    #         if is_special_ad:
+    #             # === FORCE RULES FOR SPECIAL ADS ===
+    #             # Rule 1: Age must be 18-65+ (Fixed)
+    #             targeting['age_min'] = 18
+    #             targeting['age_max'] = 65
+                
+    #             # Rule 2: Gender must be All (Hum key add hi nahi karenge, Meta auto 'All' lega)
+    #             # Note: Agar hum 'genders': [1, 2] bhejte to error aata. Isliye skip kar diya.
+                
+    #             print("ℹ️ Applied Special Ad Category Restrictions (Age 18-65+, All Genders).")
+                
+    #         else:
+    #             # === NORMAL RULES ===
+    #             # User ki marzi chalne do
+    #             targeting['age_min'] = data.get('age_min', 18)
+    #             targeting['age_max'] = data.get('age_max', 65)
+                
+    #             if data.get('genders'):
+    #                 targeting['genders'] = data['genders']
+
+    #         # --- 🔗 FLEXIBLE SPEC (Interests + Behaviors) ---
+    #         # Isay alag se handle karna zaroori hai taake 'Interests' aur 'Behaviors' mix na hon
+            
+    #         flexible_spec_item = {}
+
+    #         # 1. Interests (e.g. Cricket)
+    #         if data.get('interest_ids'):
+    #             flexible_spec_item['interests'] = [
+    #                 {'id': i_id, 'name': 'Unknown'} for i_id in data['interest_ids']
+    #             ]
+
+    #         # 2. Behaviors (e.g. Frequent Travelers)
+    #         if data.get('behavior_ids'):
+    #             flexible_spec_item['behaviors'] = [
+    #                 {'id': b_id, 'name': 'Unknown'} for b_id in data['behavior_ids']
+    #             ]
+            
+    #         # 3. Demographics/Life Events (e.g. Parents)
+    #         if data.get('life_event_ids'):
+    #             flexible_spec_item['life_events'] = [
+    #                 {'id': l_id, 'name': 'Unknown'} for l_id in data['life_event_ids']
+    #             ]
+                
+    #         # Agar koi bhi targeting item hai to add karo
+    #         if flexible_spec_item:
+    #             targeting['flexible_spec'] = [flexible_spec_item]
+
+    #         # Targeting Finalize
+    #         params['targeting'] = targeting
+
+    #         # --- 🔨 BIDDING STRATEGY ---
+    #         if data.get('bid_amount'):
+    #             params['bid_amount'] = data['bid_amount']
+    #             params['bid_strategy'] = 'COST_CAP'
+
+    #         # --- 🚀 STEP 6: EXECUTE ---
+    #         print(f"🚀 Creating Ad Set with Params: {params}")
+    #         adset = account.create_ad_set(params=params)
+
+    #         return Response({
+    #             "message": "Ad Set Created Successfully!",
+    #             "adset_id": adset['id'],
+    #             "name": data['name'],
+    #             "status": data['status'],
+    #             "warning": "Special Ad Rules Applied (Age/Gender reset)" if is_special_ad else None
+    #         }, status=status.HTTP_201_CREATED)
+
+    #     except FacebookRequestError as e:
+    #         return Response({
+    #             "error": "Meta API Error",
+    #             "message": e.api_error_message(),
+    #             "code": e.api_error_code(),
+    #             "details": e.body()
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     except Exception as e:
+    #         return Response({"error": "Internal Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)#=================================================================================================
 
     # @action(detail=False, methods=['get'])
     # def search_interests(self, request):
